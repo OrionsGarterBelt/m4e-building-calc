@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drone Building Distance Calculator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0e1a; }
+    input[type="range"] { cursor: pointer; }
+    select { appearance: none; -webkit-appearance: none; }
+    select option  { background: #0d1b2e; color: #c8d8f0; }
+    select optgroup { background: #060f1a; color: #4a7aaa; font-style: normal; }
+    input[type="text"] { font-family: 'Courier New', monospace; }
+    ::placeholder { opacity: 0.4; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    const toRad = d => (d * Math.PI) / 180;
+    const toDeg = r => (r * 180) / Math.PI;
+
+    // ─── Built-in drone preset database ──────────────────────────────────────
+    const BUILTIN_GROUPS = [
+      {
+        group: "DJI Consumer / Prosumer",
+        presets: [
+          { id:"mini2",     label:"DJI Mini 2",                         sensorW:6.3,  sensorH:4.7,  focalLen:4.49,  imgW:4000, note:"1/2.3\" · fl confirmed via EXIF" },
+          { id:"mini3pro",  label:"DJI Mini 3 Pro",                     sensorW:9.7,  sensorH:7.3,  focalLen:6.7,   imgW:8064, note:"1/1.3\" · fl confirmed via EXIF" },
+          { id:"mini4pro",  label:"DJI Mini 4 Pro",                     sensorW:9.7,  sensorH:7.3,  focalLen:6.7,   imgW:8064, note:"1/1.3\" · fl confirmed via EXIF" },
+          { id:"air2s",     label:"DJI Air 2S",                         sensorW:13.2, sensorH:8.8,  focalLen:8.38,  imgW:5472, note:"1\" · fl confirmed via EXIF" },
+          { id:"air3wide",  label:"DJI Air 3 — Wide",                   sensorW:9.7,  sensorH:7.3,  focalLen:6.7,   imgW:8064, note:"1/1.3\" · same module as Mini 3 Pro" },
+          { id:"air3tele",  label:"DJI Air 3 — Med Tele (70mm eq.)",    sensorW:9.7,  sensorH:7.3,  focalLen:19.3,  imgW:8064, note:"1/1.3\" · fl calculated from FOV ±0.3mm" },
+          { id:"m3classic", label:"DJI Mavic 3 Classic",                sensorW:17.3, sensorH:13.0, focalLen:12.29, imgW:5280, note:"4/3\" Hasselblad · confirmed DJI SDK+EXIF" },
+          { id:"m3prowide", label:"DJI Mavic 3 Pro — Wide",             sensorW:17.3, sensorH:13.0, focalLen:12.29, imgW:5280, note:"4/3\" Hasselblad · confirmed DJI SDK+EXIF" },
+          { id:"m3promid",  label:"DJI Mavic 3 Pro — Med Tele (70mm)", sensorW:9.7,  sensorH:7.3,  focalLen:19.3,  imgW:8064, note:"1/1.3\" · fl calculated from FOV ±0.3mm" },
+          { id:"m3protele", label:"DJI Mavic 3 Pro — Tele (166mm eq.)",sensorW:6.4,  sensorH:4.8,  focalLen:30.5,  imgW:4000, note:"1/2\" · interpolated from M3E SDK ±0.5mm" },
+        ],
+      },
+      {
+        group: "DJI Enterprise / Mavic",
+        presets: [
+          { id:"m3ewide",  label:"DJI Mavic 3 Enterprise — Wide",  sensorW:17.3, sensorH:13.0, focalLen:12.3,  imgW:5280, note:"4/3\" · confirmed DJI SDK official" },
+          { id:"m3ezoom",  label:"DJI Mavic 3 Enterprise — Zoom",  sensorW:6.4,  sensorH:4.8,  focalLen:29.85, imgW:4000, note:"1/2\" · confirmed DJI SDK official" },
+        ],
+      },
+      {
+        group: "DJI Matrice Series",
+        presets: [
+          { id:"m4ewide",  label:"DJI Matrice 4E — Wide",           sensorW:17.3, sensorH:13.0, focalLen:12.29, imgW:5280, note:"4/3\" · same sensor as M3E · confirmed DJI SDK" },
+          { id:"m4twide",  label:"DJI Matrice 4T — Wide (Visual)", sensorW:9.7,  sensorH:7.3,  focalLen:6.72,  imgW:8064, note:"1/1.3\" · derived from Air 3 same module" },
+        ],
+      },
+      {
+        group: "DJI Zenmuse",
+        presets: [
+          { id:"x4s",      label:"Zenmuse X4S",                       sensorW:13.2, sensorH:8.8,  focalLen:8.8,  imgW:5472, note:"1\" · confirmed DJI official spec page" },
+          { id:"x5s15",    label:"Zenmuse X5S — 15mm f/1.7 (default)",sensorW:17.3, sensorH:13.0, focalLen:15.0, imgW:5280, note:"MFT · actual focal length (MFT prime)" },
+          { id:"x7_16",    label:"Zenmuse X7 — DL-S 16mm",           sensorW:23.5, sensorH:15.7, focalLen:16.0, imgW:6016, note:"Super35 · actual focal length (prime)" },
+          { id:"x7_24",    label:"Zenmuse X7 — DL 24mm",             sensorW:23.5, sensorH:15.7, focalLen:24.0, imgW:6016, note:"Super35 · actual focal length (prime)" },
+          { id:"x7_35",    label:"Zenmuse X7 — DL 35mm",             sensorW:23.5, sensorH:15.7, focalLen:35.0, imgW:6016, note:"Super35 · actual focal length (prime)" },
+          { id:"x7_50",    label:"Zenmuse X7 — DL 50mm",             sensorW:23.5, sensorH:15.7, focalLen:50.0, imgW:6016, note:"Super35 · actual focal length (prime)" },
+          { id:"p1_24",    label:"Zenmuse P1 — DL 24mm",             sensorW:35.9, sensorH:24.0, focalLen:24.0, imgW:8192, note:"Full-frame · actual focal length (no crop)" },
+          { id:"p1_35",    label:"Zenmuse P1 — DL 35mm (default)",   sensorW:35.9, sensorH:24.0, focalLen:35.0, imgW:8192, note:"Full-frame · actual focal length (no crop)" },
+          { id:"p1_50",    label:"Zenmuse P1 — DL 50mm",             sensorW:35.9, sensorH:24.0, focalLen:50.0, imgW:8192, note:"Full-frame · actual focal length (no crop)" },
+          { id:"l2rgb",    label:"Zenmuse L2 — RGB Camera",          sensorW:17.3, sensorH:13.0, focalLen:12.29,imgW:5280, note:"4/3\" · identical to M3E platform" },
+          { id:"h20twide", label:"Zenmuse H20T — Wide",              sensorW:6.3,  sensorH:4.7,  focalLen:4.5,  imgW:4056, note:"1/2.3\" · confirmed DJI official spec page" },
+          { id:"h20tzoom", label:"Zenmuse H20T — Zoom (min FL)",     sensorW:7.6,  sensorH:5.7,  focalLen:6.83, imgW:5184, note:"1/1.7\" · confirmed DJI official spec page" },
+        ],
+      },
+      {
+        group: "Autel Robotics",
+        presets: [
+          { id:"evo2pro",   label:"Autel EVO II Pro (original)", sensorW:13.2, sensorH:8.8, focalLen:10.5,  imgW:5472, note:"1\" · fl calculated from 28.6mm equiv ±0.2mm" },
+          { id:"evo2prov3", label:"Autel EVO II Pro V3",         sensorW:13.2, sensorH:8.8, focalLen:10.6,  imgW:5472, note:"1\" RYYB · confirmed Pix4D database (SXT705)" },
+        ],
+      },
+      {
+        group: "Parrot",
+        presets: [
+          { id:"anafiusa", label:"Parrot Anafi USA — Wide EO", sensorW:5.9, sensorH:4.4, focalLen:4.0, imgW:5344, note:"1/2.4\" · confirmed Pix4D (Parrot subsidiary)" },
+        ],
+      },
+      {
+        group: "Skydio",
+        presets: [
+          { id:"skydio2p", label:"Skydio 2+", sensorW:6.3, sensorH:4.7, focalLen:3.6, imgW:4056, note:"1/2.3\" IMX577 · fl calculated from 20mm equiv — validate with EXIF" },
+        ],
+      },
+      {
+        group: "Sony Airpeak S1 + A7R IV",
+        presets: [
+          { id:"airpeak24", label:"Airpeak S1 + A7R IV — FE 24mm", sensorW:35.7, sensorH:23.8, focalLen:24.0, imgW:9504, note:"Full-frame · actual focal length (no crop)" },
+          { id:"airpeak35", label:"Airpeak S1 + A7R IV — FE 35mm", sensorW:35.7, sensorH:23.8, focalLen:35.0, imgW:9504, note:"Full-frame · actual focal length (no crop)" },
+          { id:"airpeak50", label:"Airpeak S1 + A7R IV — FE 50mm", sensorW:35.7, sensorH:23.8, focalLen:50.0, imgW:9504, note:"Full-frame · actual focal length (no crop)" },
+        ],
+      },
+    ];
+
+    // ─── Building type presets ────────────────────────────────────────────────
+    // barW: fraction of SVG width for the building column (DiagramSVG uses barWidthFrac)
+    // defaultH_m: sensible starting value when type is selected
+    const BUILDING_TYPES = [
+      { id:"warehouse",  label:"Warehouse",    maxH_m:18,   maxH_ft:60,   barW:0.30, defaultH_m:9,  note:"Single-story, wide footprint · ~30–50 ft" },
+      { id:"bizpark",    label:"Biz Park",     maxH_m:35,   maxH_ft:115,  barW:0.22, defaultH_m:15, note:"2–4 story office or retail · ~50–115 ft" },
+      { id:"midrise",    label:"Mid-rise",     maxH_m:90,   maxH_ft:295,  barW:0.16, defaultH_m:40, note:"5–15 story commercial · ~115–295 ft" },
+      { id:"highrise",   label:"High-rise",    maxH_m:335,  maxH_ft:1100, barW:0.13, defaultH_m:100,note:"Tower · up to ~1,100 ft" },
+    ];
+
+    const STORAGE_KEY = "drone_calc_custom_presets_v1";
+
+    function loadCustomPresets() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch { return []; }
+    }
+
+    function saveCustomPresets(presets) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(presets)); } catch {}
+    }
+
+    // ─── Style helpers ────────────────────────────────────────────────────────
+    const labelStyle = (color = "#7ab8e8") => ({
+      fontSize: 12, fontWeight: "bold", letterSpacing: "0.18em", color,
+      textShadow: `0 0 10px ${color}88, 0 1px 3px rgba(0,0,0,0.9)`,
+    });
+    const noteStyle = (color = "#6a9abf") => ({
+      fontSize: 11, fontWeight: "bold", color,
+      textShadow: "0 1px 4px rgba(0,0,0,0.9)", marginTop: 6,
+    });
+    const ghostBtn = (color = "#4a7aaa", hoverColor = "#00d4ff") => ({
+      base: { background: "transparent", border: `1px solid ${color}55`, borderRadius: 3,
+        color: color, fontSize: 10, fontWeight: "bold", fontFamily: "inherit",
+        padding: "3px 9px", cursor: "pointer", letterSpacing: "0.1em", whiteSpace: "nowrap" },
+      enter: { borderColor: hoverColor, color: hoverColor },
+      leave: { borderColor: `${color}55`, color: color },
+    });
+
+    // ─── EditableValue ────────────────────────────────────────────────────────
+    function EditableValue({ rawValue, display, onChange, min, max, color = "#00d4ff", fontSize = 14, suffix = "" }) {
+      const [editing, setEditing] = useState(false);
+      const [draft,   setDraft]   = useState("");
+      const inputRef = useRef(null);
+      useEffect(() => { if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, [editing]);
+      const startEdit = () => { setDraft(rawValue != null ? String(rawValue) : ""); setEditing(true); };
+      const commit = () => {
+        const p = parseFloat(draft);
+        if (!isNaN(p)) {
+          let v = p;
+          if (min !== undefined) v = Math.max(min, v);
+          if (max !== undefined) v = Math.min(max, v);
+          onChange(v);
+        }
+        setEditing(false);
+      };
+      const cancel = () => setEditing(false);
+      const onKeyDown = e => {
+        if (e.key === "Enter")  { e.preventDefault(); commit(); }
+        if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      };
+      if (editing) return (
+        <input ref={inputRef} type="text" value={draft}
+          onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={onKeyDown}
+          placeholder={suffix}
+          style={{ background:"#0a1828", border:`1px solid ${color}`, borderRadius:4,
+            color, fontSize, fontWeight:"bold", fontFamily:"'Courier New', monospace",
+            padding:"2px 6px", width:"80px", outline:"none",
+            boxShadow:`0 0 8px ${color}66`, textShadow:`0 0 6px ${color}88` }}/>
+      );
+      return (
+        <span onClick={startEdit} title="Click to type a value"
+          style={{ fontSize, color, fontWeight:"bold", textShadow:`0 0 8px ${color}88`,
+            cursor:"text", borderBottom:`1px dashed ${color}55`, paddingBottom:1,
+            userSelect:"none", transition:"border-color 0.15s" }}
+          onMouseEnter={e => e.currentTarget.style.borderBottomColor = color}
+          onMouseLeave={e => e.currentTarget.style.borderBottomColor = `${color}55`}>
+          {display}
+        </span>
+      );
+    }
+
+    // ─── Calculations ─────────────────────────────────────────────────────────
+    function calculate({ buildingHeight, skyPct, buildingPct, unit, sensorW, sensorH, focalLen }) {
+      const toM = unit === "ft" ? 0.3048 : 1;
+      const H = buildingHeight * toM;
+      const vFovRad = 2 * Math.atan(sensorH / (2 * focalLen));
+      const vFovDeg = toDeg(vFovRad);
+      const aboveFrac = (0.5 - skyPct / 100) / 0.5;
+      const belowFrac = ((skyPct + buildingPct) / 100 - 0.5) / 0.5;
+      const alphaTop    = Math.atan(aboveFrac * (sensorH / 2) / focalLen);
+      const alphaBottom = Math.atan(belowFrac * (sensorH / 2) / focalLen);
+      const D_m   = H / (Math.tan(alphaTop) + Math.tan(alphaBottom));
+      const alt_m = D_m * Math.tan(alphaBottom);
+      const fromM = unit === "ft" ? 3.28084 : 1;
+      return { D_m, alt_m,
+        distance: D_m * fromM, altitude: alt_m * fromM, vFovDeg,
+        alphaTopDeg: toDeg(alphaTop), alphaBottomDeg: toDeg(alphaBottom),
+        groundCoverage: 2 * D_m * Math.tan(vFovRad / 2) * fromM,
+      };
+    }
+
+    function calculateOverlap({ D_m, overlapPct, droneSpeed_ms, shutterDenom, buildingLength_m, unit, sensorW, sensorH, focalLen, imagePx }) {
+      const fW = D_m * (sensorW / focalLen);
+      const fH = D_m * (sensorH / focalLen);
+      const step = fW * (1 - overlapPct / 100);
+      const pitch = (sensorW / imagePx) / 1000;
+      const gsd = (pitch / (focalLen / 1000)) * D_m;
+      const intv = step / droneSpeed_ms;
+      const blur = (droneSpeed_ms / shutterDenom) / gsd;
+      const maxSpd = gsd * shutterDenom;
+      const shots = buildingLength_m > 0 ? Math.floor(buildingLength_m / step) + 1 : null;
+      const time  = shots ? (shots - 1) * intv : null;
+      const fromM = unit === "ft" ? 3.28084 : 1;
+      return { footprintW: fW*fromM, footprintH: fH*fromM, stepDist: step*fromM,
+        GSD_mm_per_px: gsd*1000, GSD_cm_per_px: gsd*100,
+        interval_s: intv, blurPx: blur, maxSpeed_ms: maxSpd, maxSpeed: maxSpd*fromM,
+        numShots: shots, totalTime_s: time,
+      };
+    }
+
+    // ─── Inverse framing: back-calculate skyPct/buildingPct from dragged position ─
+    function inverseCalc({ D_m, alt_m, bh_m, sensorH, focalLen }) {
+      const d    = Math.max(D_m, 0.01);
+      const alphaBottom = Math.atan(alt_m / d);
+      const tanTop      = bh_m / d - Math.tan(alphaBottom);
+      const alphaTop    = Math.atan(Math.max(0.001, tanTop));
+      const halfFov     = sensorH / (2 * focalLen);            // = tan(vFov/2)
+      const aboveFrac   = Math.tan(alphaTop)    / halfFov;
+      const belowFrac   = Math.tan(alphaBottom) / halfFov;
+      let sky  = Math.round(50 - aboveFrac * 50);
+      sky  = Math.max(0, Math.min(49, sky));
+      let bldg = Math.round(50 + belowFrac * 50 - sky);
+      bldg = Math.max(1, Math.min(99 - sky, bldg));
+      return { skyPct: sky, buildingPct: bldg };
+    }
+
+    // ─── FOV diagram ──────────────────────────────────────────────────────────
+    function DiagramSVG({ skyPct, buildingPct, groundPct, result, unit, buildingHeight, barWidthFrac, maxH_m, maxH_ft, onDroneMove }) {
+      const lbl     = unit === "ft" ? "ft" : "m";
+      const bh_m    = unit === "ft" ? buildingHeight / 3.28084 : buildingHeight;
+      const maxBH_m = unit === "ft" ? maxH_ft / 3.28084 : maxH_m;
+
+      const svgRef      = useRef(null);
+      const [isDragging, setIsDragging] = useState(false);
+
+      // ── Canvas ────────────────────────────────────────────────────────────────
+      const W = 900, H = 420;
+      const mL = 64, mR = 22, mT = 26, mB = 68;
+      const groundY = H - mB;
+
+      // ── Building bar ──────────────────────────────────────────────────────────
+      const barW_px = Math.round(W * Math.max(0.12, Math.min(0.40, barWidthFrac)));
+      const barX    = W - mR - barW_px;
+      const availH  = groundY - mT;
+      const barH_px = Math.max(60, Math.min(availH - 8, availH * 0.82 * (bh_m / Math.max(maxBH_m, 0.1))));
+      const pxPerM  = barH_px / Math.max(bh_m, 0.01);
+      const barTopY = groundY - barH_px;
+      const barBotY = groundY;
+
+      // ── Frame bands ───────────────────────────────────────────────────────────
+      const bp        = Math.max(buildingPct, 1);
+      const skyH_px   = Math.min(bh_m * (skyPct / bp) * pxPerM, availH * 0.5);
+      const gndH_px   = Math.min(bh_m * (Math.max(0, groundPct) / bp) * pxPerM, barH_px * 0.5);
+      const frameTopY = barTopY - skyH_px;
+
+      // ── Drone position ────────────────────────────────────────────────────────
+      const alt_m  = result ? result.alt_m : bh_m * 0.45;
+      const dist_m = result ? result.D_m   : bh_m * 1.6;
+      const droneY = Math.max(mT + 14, Math.min(groundY - 14, groundY - alt_m  * pxPerM));
+      const droneX = Math.max(mL + 18, Math.min(barX - 10,    barX   - dist_m * pxPerM));
+
+      // ── Geometry + callback refs (updated every render, read by stable handlers)
+      const geoRef = useRef({});
+      geoRef.current = { barX, groundY, pxPerM, bh_m, mL, mT, droneX, droneY };
+      const cbRef  = useRef(onDroneMove);
+      cbRef.current = onDroneMove;
+
+      // ── Shared coord converter using getScreenCTM — handles viewBox scaling ──
+      const toSVG = (svg, clientX, clientY) => {
+        const pt = svg.createSVGPoint();
+        pt.x = clientX; pt.y = clientY;
+        return pt.matrixTransform(svg.getScreenCTM().inverse());
+      };
+
+      // ── Shared apply: SVG point → onDroneMove call ────────────────────────────
+      const applyPoint = (svgPt) => {
+        const cb = cbRef.current;
+        if (!cb) return;
+        const g  = geoRef.current;
+        const cx = Math.max(g.mL + 18, Math.min(g.barX - 10,    svgPt.x));
+        const cy = Math.max(g.mT + 14, Math.min(g.groundY - 14, svgPt.y));
+        cb(Math.max(0.5, (g.barX - cx) / g.pxPerM),
+           Math.max(0, Math.min(g.bh_m, (g.groundY - cy) / g.pxPerM)));
+      };
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // PATTERN 1 — window-level mousemove/mouseup (most robust, survives
+      //             React re-renders because listeners live on window, not SVG)
+      // ══════════════════════════════════════════════════════════════════════════
+      const dragOrigin = useRef(null); // { startSvgX, startSvgY, origDroneX, origDroneY }
+
+      const onDroneMouseDown = (e) => {
+        if (!cbRef.current) return;
+        const svg = svgRef.current;
+        if (!svg) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const pt = toSVG(svg, e.clientX, e.clientY);
+        const g  = geoRef.current;
+        dragOrigin.current = { startX: pt.x, startY: pt.y,
+                               origDroneX: g.droneX, origDroneY: g.droneY };
+        setIsDragging(true);
+
+        const onWindowMove = (ev) => {
+          const origin = dragOrigin.current;
+          if (!origin) return;
+          const svg2 = svgRef.current;
+          if (!svg2) return;
+          const p  = toSVG(svg2, ev.clientX, ev.clientY);
+          // New drone SVG position = origin + delta
+          const nx = origin.origDroneX + (p.x - origin.startX);
+          const ny = origin.origDroneY + (p.y - origin.startY);
+          applyPoint({ x: nx, y: ny });
+        };
+
+        const onWindowUp = () => {
+          dragOrigin.current = null;
+          setIsDragging(false);
+          window.removeEventListener('mousemove', onWindowMove);
+          window.removeEventListener('mouseup',   onWindowUp);
+        };
+
+        window.addEventListener('mousemove', onWindowMove);
+        window.addEventListener('mouseup',   onWindowUp);
+      };
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // PATTERN 2 — setPointerCapture on drone <g> with React synthetic events
+      //             (simpler; pointer capture keeps events flowing to element)
+      // ══════════════════════════════════════════════════════════════════════════
+      const p2drag = useRef(null);
+
+      const onDronePtrDown = (e) => {
+        if (!cbRef.current) return;
+        const svg = svgRef.current;
+        if (!svg) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const pt = toSVG(svg, e.clientX, e.clientY);
+        const g  = geoRef.current;
+        p2drag.current = { startX: pt.x, startY: pt.y,
+                           origDroneX: g.droneX, origDroneY: g.droneY };
+        setIsDragging(true);
+      };
+
+      const onDronePtrMove = (e) => {
+        if (!p2drag.current) return;
+        const svg = svgRef.current;
+        if (!svg) return;
+        const pt = toSVG(svg, e.clientX, e.clientY);
+        const o  = p2drag.current;
+        applyPoint({ x: o.origDroneX + (pt.x - o.startX),
+                     y: o.origDroneY + (pt.y - o.startY) });
+      };
+
+      const onDronePtrUp = () => { p2drag.current = null; setIsDragging(false); };
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // PATTERN 3 — native addEventListener in useEffect (no React event system)
+      //             droneRef attached to the invisible hit circle
+      // ══════════════════════════════════════════════════════════════════════════
+      const droneHitRef = useRef(null);
+
+      useEffect(() => {
+        const hit = droneHitRef.current;
+        const svg = svgRef.current;
+        if (!hit || !svg) return;
+
+        let p3origin = null;
+
+        const onDown = (e) => {
+          if (!cbRef.current) return;
+          e.preventDefault();
+          hit.setPointerCapture(e.pointerId);
+          const pt = toSVG(svg, e.clientX, e.clientY);
+          const g  = geoRef.current;
+          p3origin = { startX: pt.x, startY: pt.y,
+                       origDroneX: g.droneX, origDroneY: g.droneY };
+          setIsDragging(true);
+        };
+        const onMove = (e) => {
+          if (!p3origin) return;
+          const pt = toSVG(svg, e.clientX, e.clientY);
+          applyPoint({ x: p3origin.origDroneX + (pt.x - p3origin.startX),
+                       y: p3origin.origDroneY + (pt.y - p3origin.startY) });
+        };
+        const onUp = () => { p3origin = null; setIsDragging(false); };
+
+        hit.addEventListener('pointerdown',   onDown, { passive: false });
+        hit.addEventListener('pointermove',   onMove);
+        hit.addEventListener('pointerup',     onUp);
+        hit.addEventListener('pointercancel', onUp);
+        return () => {
+          hit.removeEventListener('pointerdown',   onDown);
+          hit.removeEventListener('pointermove',   onMove);
+          hit.removeEventListener('pointerup',     onUp);
+          hit.removeEventListener('pointercancel', onUp);
+        };
+      }, []); // once on mount; reads live values via geoRef/cbRef
+
+      const canDrag     = !!onDroneMove;
+      const droneCursor = !canDrag ? "default" : isDragging ? "grabbing" : "grab";
+
+      return (
+        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`}
+          style={{ width:"100%", display:"block", touchAction:"none", cursor: droneCursor }}>
+          <defs>
+            <filter id="ts" x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="0" dy="1" stdDeviation="2" floodColor="black" floodOpacity="1"/>
+            </filter>
+            <marker id="arr"  markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+              <path d="M0,0.5 L6,3.5 L0,6.5" fill="none" stroke="#00d4ff" strokeWidth="1.2"/>
+            </marker>
+            <marker id="arrl" markerWidth="7" markerHeight="7" refX="0" refY="3.5" orient="auto">
+              <path d="M6,0.5 L0,3.5 L6,6.5" fill="none" stroke="#00d4ff" strokeWidth="1.2"/>
+            </marker>
+            <clipPath id="main-clip">
+              <rect x={0} y={0} width={W} height={groundY + 2}/>
+            </clipPath>
+            <clipPath id="bar-clip">
+              <rect x={barX} y={mT - 6} width={barW_px + mR + 4} height={groundY - mT + mB - 8}/>
+            </clipPath>
+          </defs>
+
+          {/* ═══ BUILDING BAR ════════════════════════════════════════════════════ */}
+          <g clipPath="url(#bar-clip)">
+            {skyH_px > 1 && (
+              <rect x={barX} y={frameTopY} width={barW_px} height={skyH_px}
+                fill="#1a3a5c" opacity="0.65"/>
+            )}
+            <rect x={barX} y={barTopY} width={barW_px} height={barH_px}
+              fill="#1e3a6a" opacity="0.70"/>
+            {gndH_px > 1 && (
+              <rect x={barX} y={groundY - gndH_px} width={barW_px} height={gndH_px}
+                fill="#2d5a1e" opacity="0.80"/>
+            )}
+            <rect x={barX} y={barTopY} width={barW_px} height={barH_px}
+              fill="none" stroke="#3a7bd5" strokeWidth="2" opacity="0.90"/>
+            {skyH_px > 16 && (
+              <text x={barX + barW_px/2} y={frameTopY + skyH_px/2 + 5}
+                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#7ecfee" filter="url(#ts)">
+                SKY {skyPct}%
+              </text>
+            )}
+            {barH_px > 18 && (
+              <text x={barX + barW_px/2} y={barTopY + barH_px/2 + 5}
+                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#c8d8f0" filter="url(#ts)">
+                BLDG {buildingPct}%
+              </text>
+            )}
+            {gndH_px > 16 && (
+              <text x={barX + barW_px/2} y={groundY - gndH_px/2 + 5}
+                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#9edd6a" filter="url(#ts)">
+                GND {groundPct}%
+              </text>
+            )}
+          </g>
+
+          {/* ═══ GROUND LINE — drawn after bar so it sits on top of green band ═══ */}
+          <line x1={0} y1={groundY} x2={barX} y2={groundY}
+            stroke="#ffffff" strokeWidth="1.8" opacity="0.50" strokeDasharray="9,5"/>
+          <line x1={barX} y1={groundY} x2={W} y2={groundY}
+            stroke="#ffffff" strokeWidth="2.6" opacity="0.78"/>
+
+          {/* ═══ BUILDING HEIGHT TICK ════════════════════════════════════════════ */}
+          {barH_px > 24 && (
+            <g>
+              <line x1={barX + barW_px + 7} y1={barTopY} x2={barX + barW_px + 7} y2={barBotY}
+                stroke="#3a7bd5" strokeWidth="1.2" opacity="0.6"/>
+              <line x1={barX + barW_px + 4} y1={barTopY} x2={barX + barW_px + 11} y2={barTopY}
+                stroke="#3a7bd5" strokeWidth="1.2" opacity="0.6"/>
+              <line x1={barX + barW_px + 4} y1={barBotY} x2={barX + barW_px + 11} y2={barBotY}
+                stroke="#3a7bd5" strokeWidth="1.2" opacity="0.6"/>
+              <text x={barX + barW_px + 18} y={(barTopY + barBotY) / 2}
+                textAnchor="middle" fontSize="11" fontWeight="bold" fill="#3a7bd5" filter="url(#ts)"
+                transform={`rotate(-90,${barX + barW_px + 18},${(barTopY + barBotY) / 2})`}>
+                {buildingHeight}{lbl}
+              </text>
+            </g>
+          )}
+
+          {/* ═══ FOV RAYS ════════════════════════════════════════════════════════ */}
+          <g clipPath="url(#main-clip)">
+            <line x1={droneX} y1={droneY} x2={barX} y2={frameTopY}
+              stroke="#00d4ff" strokeWidth="1.1" strokeDasharray="5,3" opacity="0.45"/>
+            <line x1={droneX} y1={droneY} x2={barX} y2={groundY}
+              stroke="#00d4ff" strokeWidth="1.1" strokeDasharray="5,3" opacity="0.45"/>
+            <line x1={droneX} y1={droneY} x2={barX} y2={barTopY}
+              stroke="#ff6b35" strokeWidth="1.8" strokeDasharray="6,3" opacity="0.90"/>
+            <line x1={droneX} y1={droneY} x2={barX} y2={barBotY}
+              stroke="#ff6b35" strokeWidth="1.8" strokeDasharray="6,3" opacity="0.90"/>
+            <line x1={droneX + 14} y1={droneY} x2={barX - 6} y2={droneY}
+              stroke="#ffffff" strokeWidth="0.6" opacity="0.15" strokeDasharray="3,6"/>
+          </g>
+
+          {/* ═══ ALTITUDE BAR ════════════════════════════════════════════════════ */}
+          {alt_m > 0.3 && droneY < groundY - 8 && (
+            <g>
+              <line x1={droneX} y1={droneY + 10} x2={droneX} y2={groundY}
+                stroke="#ff2244" strokeWidth="2" opacity="0.85"/>
+              {(groundY - droneY) > 28 && (
+                <text x={droneX - 8} y={(droneY + groundY) / 2}
+                  textAnchor="middle" fontSize="11" fontWeight="bold" fill="#ff2244" filter="url(#ts)"
+                  transform={`rotate(-90,${droneX - 8},${(droneY + groundY) / 2})`}>
+                  {result ? result.altitude.toFixed(1) : ""}{lbl}
+                </text>
+              )}
+            </g>
+          )}
+
+          {/* ═══ DRONE — all 3 drag patterns wired ══════════════════════════════ */}
+          <ellipse cx={droneX} cy={groundY} rx={6} ry={2.5} fill="#00d4ff" opacity="0.14"/>
+          {canDrag && !isDragging && (
+            <circle cx={droneX} cy={droneY} r={20}
+              fill="none" stroke="#00d4ff" strokeWidth="1" opacity="0.25" strokeDasharray="3,3"/>
+          )}
+          {isDragging && (
+            <circle cx={droneX} cy={droneY} r={20}
+              fill="#00d4ff" fillOpacity="0.10" stroke="#00d4ff" strokeWidth="1.5" strokeOpacity="0.5"/>
+          )}
+          {/* Pattern 1+2: onMouseDown (window listeners) + onPointerDown (capture) on <g> */}
+          <g style={{ cursor: droneCursor, userSelect:"none", touchAction:"none" }}
+            onMouseDown={canDrag ? onDroneMouseDown : undefined}
+            onPointerDown={canDrag ? onDronePtrDown : undefined}
+            onPointerMove={canDrag ? onDronePtrMove : undefined}
+            onPointerUp={canDrag ? onDronePtrUp : undefined}
+            onPointerCancel={canDrag ? onDronePtrUp : undefined}>
+            <circle cx={droneX} cy={droneY} r={11}
+              fill="#00d4ff" fillOpacity={isDragging ? 0.25 : 0.13} stroke="#00d4ff" strokeWidth="2"/>
+            <line x1={droneX - 14} y1={droneY - 3} x2={droneX + 14} y2={droneY - 3}
+              stroke="#00d4ff" strokeWidth="1.5" opacity="0.6"/>
+            <line x1={droneX - 18} y1={droneY - 1} x2={droneX - 10} y2={droneY - 5}
+              stroke="#00d4ff" strokeWidth="2" opacity="0.75" strokeLinecap="round"/>
+            <line x1={droneX + 10} y1={droneY - 5} x2={droneX + 18} y2={droneY - 1}
+              stroke="#00d4ff" strokeWidth="2" opacity="0.75" strokeLinecap="round"/>
+            <rect x={droneX + 8} y={droneY - 3} width={7} height={5}
+              fill="#00d4ff" opacity="0.55" rx={1}/>
+            <circle cx={droneX} cy={droneY} r={3.5} fill="#00d4ff" opacity="0.7"/>
+            {/* Pattern 3: native addEventListener via droneHitRef on this circle */}
+            <circle ref={droneHitRef} cx={droneX} cy={droneY} r={26}
+              fill="transparent" style={{ cursor: droneCursor, touchAction:"none" }}/>
+          </g>
+
+          {/* ═══ DISTANCE ARROW ══════════════════════════════════════════════════ */}
+          <line x1={droneX + 8} y1={groundY - 16} x2={barX - 6} y2={groundY - 16}
+            stroke="#00d4ff" strokeWidth="1.4"
+            markerEnd="url(#arr)" markerStart="url(#arrl)" opacity="0.72"/>
+          <text x={(droneX + barX) / 2} y={groundY - 3}
+            textAnchor="middle" fontSize="13" fontWeight="bold" fill="#00d4ff" filter="url(#ts)">
+            D = {result ? result.distance.toFixed(1) : "—"}{result ? lbl : ""}
+          </text>
+        </svg>
+      );
+    }
+
+    // ─── OverlapViz ───────────────────────────────────────────────────────────
+    // Front-face (orthographic) facade view. Shows:
+    //   • The building face as a tall rect
+    //   • Successive image footprints marching left→right with overlap zones
+    //   • Step distance arrow + footprint width arrow
+    //   • GSD pixel-scale indicator bottom-right
+    //   • Building height label on left edge
+    function OverlapViz({ overlap, overlapPct, unit, buildingHeight, buildingLengthM, droneSpeedMs, shutterDenom }) {
+      if (!overlap) return null;
+      const lbl      = unit === "ft" ? "ft" : "m";
+      const fromM    = unit === "ft" ? 3.28084 : 1;
+
+      // Canvas
+      const W = 860, H = 230;
+      const padL = 52, padR = 20, padT = 28, padB = 38;
+      const drawW = W - padL - padR;
+      const drawH = H - padT - padB;
+
+      // Building face height in scene units (meters)
+      const bh_m  = unit === "ft" ? buildingHeight / 3.28084 : buildingHeight;
+      // Footprint dimensions in meters
+      const fpW_m = overlap.footprintW / fromM;
+      const fpH_m = overlap.footprintH / fromM;
+      // Step in meters
+      const step_m = overlap.stepDist  / fromM;
+
+      // Pixel-per-meter for the diagram — fit building height into drawH
+      const pxPerM_v = drawH / Math.max(bh_m, fpH_m * 1.1, 0.01);
+      // Horizontal: show enough steps to fill drawW (at least 2 full frames visible)
+      const visWidth_m = drawW / Math.max(1, (drawW / (fpW_m * pxPerM_v)));  // metres visible
+      const pxPerM_h   = drawW / Math.max(visWidth_m, fpW_m * 2.2, 0.01);
+
+      // How many frames to draw (cap at 12 for perf + clarity)
+      const nFrames    = Math.min(12, Math.max(2, Math.ceil(drawW / (step_m * pxPerM_h)) + 2));
+
+      // Building face rect in canvas coords
+      const bFaceH = bh_m  * pxPerM_v;
+      const bFaceW = buildingLengthM * pxPerM_h;   // may exceed drawW — clipped
+      const bFaceY = padT + (drawH - bFaceH) / 2;
+      const bFaceX = padL;
+
+      // Frame height in canvas coords
+      const fH_px  = fpH_m * pxPerM_v;
+      const fW_px  = fpW_m * pxPerM_h;
+      const step_px = step_m * pxPerM_h;
+
+      // Vertically center the footprint strip on the building face
+      // (footprint may be taller than building — clamp top/bottom)
+      const footprintTopY  = padT + (drawH - fH_px) / 2;
+      const footprintBotY  = footprintTopY + fH_px;
+
+      // Clamp to building face
+      const stripTop = Math.max(bFaceY, footprintTopY);
+      const stripBot = Math.min(bFaceY + bFaceH, footprintBotY);
+
+      // Frames start slightly left of padL so the first overlap enters from left
+      const frame0X = padL - fW_px * 0.1;
+
+      // Colours
+      const overlapColor  = "#6ad86a";
+      const frameColor    = "#00d4ff";
+      const bldgFaceColor = "#1e3a6a";
+      const bldgEdge      = "#3a7bd5";
+
+      // Build frame rects
+      const frames = Array.from({ length: nFrames }, (_, i) => ({
+        x: frame0X + i * step_px,
+        w: fW_px,
+      }));
+
+      // GSD pixel-scale bar: show 1m or 0.1m worth of GSD pixels
+      const gsd_m = overlap.GSD_mm_per_px / 1000;
+      const refReal  = gsd_m < 0.01 ? 0.1 : 1;      // 0.1m or 1m reference
+      const refPx    = refReal * pxPerM_h;            // how wide that is in canvas
+      const scaleBarX = W - padR - Math.min(refPx, 80);
+      const scaleBarY = H - padB + 16;
+
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
+          <defs>
+            <filter id="ovts" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodColor="black" floodOpacity="0.9"/>
+            </filter>
+            <marker id="ovarr"  markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6" fill="none" stroke="#f0d040" strokeWidth="1"/>
+            </marker>
+            <marker id="ovarrl" markerWidth="6" markerHeight="6" refX="0" refY="3" orient="auto">
+              <path d="M6,0 L0,3 L6,6" fill="none" stroke="#f0d040" strokeWidth="1"/>
+            </marker>
+            <marker id="fwarr"  markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6" fill="none" stroke={frameColor} strokeWidth="1"/>
+            </marker>
+            <marker id="fwarrl" markerWidth="6" markerHeight="6" refX="0" refY="3" orient="auto">
+              <path d="M6,0 L0,3 L6,6" fill="none" stroke={frameColor} strokeWidth="1"/>
+            </marker>
+            {/* Clip everything to the drawing area */}
+            <clipPath id="ovclip">
+              <rect x={padL} y={padT} width={drawW} height={drawH}/>
+            </clipPath>
+          </defs>
+
+          {/* ── Title ── */}
+          <text x={padL} y={14} fontSize="10" fontWeight="bold" fill="#4a9a6a"
+            letterSpacing="0.18em" filter="url(#ovts)">FACADE SCAN · FRONT VIEW</text>
+
+          {/* ── All drawing content, clipped ── */}
+          <g clipPath="url(#ovclip)">
+
+            {/* Building face */}
+            <rect x={bFaceX} y={bFaceY} width={Math.min(bFaceW, drawW)} height={bFaceH}
+              fill={bldgFaceColor} opacity="0.6"/>
+            <rect x={bFaceX} y={bFaceY} width={Math.min(bFaceW, drawW)} height={bFaceH}
+              fill="none" stroke={bldgEdge} strokeWidth="1.5" opacity="0.8"/>
+
+            {/* Overlap zones: between consecutive frames */}
+            {frames.slice(0, -1).map((f, i) => {
+              const overlapX = f.x + step_px;
+              const overlapW = f.w - step_px;
+              if (overlapW <= 0) return null;
+              return (
+                <rect key={`ov${i}`}
+                  x={overlapX} y={stripTop} width={overlapW} height={stripBot - stripTop}
+                  fill={overlapColor} opacity="0.18"/>
+              );
+            })}
+
+            {/* Frame outlines */}
+            {frames.map((f, i) => (
+              <rect key={`fr${i}`}
+                x={f.x} y={footprintTopY} width={f.w} height={fH_px}
+                fill="none" stroke={frameColor}
+                strokeWidth={i === 0 ? 1.8 : 1.2}
+                opacity={i === 0 ? 0.9 : 0.45}
+                strokeDasharray={i === 0 ? "none" : "4,3"}/>
+            ))}
+
+            {/* Highlight the first active frame fill */}
+            <rect x={frames[0].x} y={footprintTopY} width={fW_px} height={fH_px}
+              fill={frameColor} opacity="0.06"/>
+
+            {/* ── Step distance arrow (between frame 0 left and frame 1 left) ── */}
+            {step_px > 18 && (() => {
+              const arrowY = stripBot + 14;
+              return (
+                <g>
+                  <line x1={frames[0].x + step_px} y1={arrowY}
+                        x2={frames[0].x + 2}        y2={arrowY}
+                    stroke="#f0d040" strokeWidth="1.2"
+                    markerEnd="url(#ovarr)" markerStart="url(#ovarrl)" opacity="0.85"/>
+                  <text x={frames[0].x + step_px/2} y={arrowY - 3}
+                    textAnchor="middle" fontSize="9" fontWeight="bold" fill="#f0d040" filter="url(#ovts)">
+                    step {overlap.stepDist.toFixed(2)}{lbl}
+                  </text>
+                </g>
+              );
+            })()}
+
+            {/* ── Footprint width arrow (top of first frame) ── */}
+            {fW_px > 30 && (() => {
+              const arrowY = footprintTopY - 10;
+              return (
+                <g>
+                  <line x1={frames[0].x + fW_px - 2} y1={arrowY}
+                        x2={frames[0].x + 2}          y2={arrowY}
+                    stroke={frameColor} strokeWidth="1.2"
+                    markerEnd="url(#fwarr)" markerStart="url(#fwarrl)" opacity="0.7"/>
+                  <text x={frames[0].x + fW_px/2} y={arrowY - 4}
+                    textAnchor="middle" fontSize="9" fontWeight="bold" fill={frameColor} filter="url(#ovts)">
+                    footprint {overlap.footprintW.toFixed(1)}{lbl}
+                  </text>
+                </g>
+              );
+            })()}
+
+            {/* ── Overlap % badge on first overlap zone ── */}
+            {frames.length > 1 && (() => {
+              const ozX = frames[0].x + step_px;
+              const ozW = fW_px - step_px;
+              if (ozW < 8) return null;
+              const midX = ozX + ozW / 2;
+              const midY = (stripTop + stripBot) / 2 + 4;
+              return (
+                <text x={midX} y={midY}
+                  textAnchor="middle" fontSize="10" fontWeight="bold"
+                  fill={overlapColor} filter="url(#ovts)" opacity="0.9">
+                  {overlapPct}%
+                </text>
+              );
+            })()}
+          </g>
+
+          {/* ── Building height label (left axis) ── */}
+          {bFaceH > 16 && (
+            <g>
+              <line x1={padL - 10} y1={bFaceY} x2={padL - 10} y2={bFaceY + bFaceH}
+                stroke={bldgEdge} strokeWidth="1" opacity="0.6"/>
+              <line x1={padL - 13} y1={bFaceY}           x2={padL - 7} y2={bFaceY}           stroke={bldgEdge} strokeWidth="1" opacity="0.6"/>
+              <line x1={padL - 13} y1={bFaceY + bFaceH}  x2={padL - 7} y2={bFaceY + bFaceH}  stroke={bldgEdge} strokeWidth="1" opacity="0.6"/>
+              <text x={padL - 14} y={bFaceY + bFaceH/2}
+                textAnchor="middle" fontSize="9" fontWeight="bold" fill={bldgEdge}
+                filter="url(#ovts)" transform={`rotate(-90,${padL-14},${bFaceY+bFaceH/2})`}>
+                {buildingHeight}{lbl}
+              </text>
+            </g>
+          )}
+
+          {/* ── Bottom axis labels ── */}
+          <line x1={padL} y1={H - padB + 2} x2={W - padR} y2={H - padB + 2}
+            stroke="#1e3a5f" strokeWidth="1"/>
+
+          {/* ── GSD pixel-scale indicator ── */}
+          <g>
+            <line x1={scaleBarX} y1={scaleBarY} x2={W - padR} y2={scaleBarY}
+              stroke="#00d4ff" strokeWidth="2" opacity="0.5"/>
+            <line x1={scaleBarX}   y1={scaleBarY - 4} x2={scaleBarX}   y2={scaleBarY + 4} stroke="#00d4ff" strokeWidth="1" opacity="0.5"/>
+            <line x1={W - padR}    y1={scaleBarY - 4} x2={W - padR}    y2={scaleBarY + 4} stroke="#00d4ff" strokeWidth="1" opacity="0.5"/>
+            <text x={(scaleBarX + W - padR)/2} y={scaleBarY + 12}
+              textAnchor="middle" fontSize="8" fontWeight="bold" fill="#00d4ff" opacity="0.6">
+              = {refReal}{lbl} · GSD {overlap.GSD_cm_per_px.toFixed(2)}cm/px
+            </text>
+          </g>
+
+          {/* ── Legend ── */}
+          <g transform={`translate(${padL}, ${H - padB + 8})`}>
+            <rect x={0} y={0} width={10} height={8} fill="none" stroke={frameColor} strokeWidth="1.5" opacity="0.8"/>
+            <text x={14} y={8} fontSize="9" fontWeight="bold" fill={frameColor} opacity="0.7">frame footprint</text>
+            <rect x={90} y={0} width={10} height={8} fill={overlapColor} opacity="0.35"/>
+            <rect x={90} y={0} width={10} height={8} fill="none" stroke={overlapColor} strokeWidth="0.8" opacity="0.5"/>
+            <text x={104} y={8} fontSize="9" fontWeight="bold" fill={overlapColor} opacity="0.7">overlap zone</text>
+            <rect x={186} y={0} width={10} height={8} fill={bldgFaceColor} opacity="0.7" stroke={bldgEdge} strokeWidth="1"/>
+            <text x={200} y={8} fontSize="9" fontWeight="bold" fill={bldgEdge} opacity="0.7">building face</text>
+          </g>
+        </svg>
+      );
+    }
+
+    // ─── BlurBadge ────────────────────────────────────────────────────────────
+    function BlurBadge({ blurPx }) {
+      const g = blurPx<=1, ok = blurPx<=2;
+      const c = g?"#00ff88":ok?"#ffd700":"#ff4444";
+      const l = g?"SHARP":ok?"ACCEPTABLE":"TOO BLURRY";
+      return <span style={{background:c+"22",border:`1px solid ${c}`,borderRadius:3,
+        padding:"3px 10px",fontSize:12,color:c,fontWeight:"bold",letterSpacing:"0.12em",
+        textShadow:`0 0 8px ${c}66`}}>{l} ({blurPx.toFixed(2)} px)</span>;
+    }
+
+    // ─── SliderRow ────────────────────────────────────────────────────────────
+    function SliderRow({ label, value, min, max, step, onChange, displayFn, color="#00d4ff", suffix="" }) {
+      return (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6,alignItems:"center"}}>
+            <span style={labelStyle("#7ab8e8")}>{label}</span>
+            <EditableValue rawValue={value} display={displayFn?displayFn(value):`${value}${suffix}`}
+              onChange={onChange} min={min} max={max} color={color} fontSize={14} suffix={suffix}/>
+          </div>
+          <input type="range" min={min} max={max} step={step} value={value}
+            onChange={e=>onChange(Number(e.target.value))} style={{width:"100%",accentColor:color}}/>
+        </div>
+      );
+    }
+
+    // ─── SectionHeader ────────────────────────────────────────────────────────
+    function SectionHeader({ text, color="#7ab8e8", border="#1e3a5f" }) {
+      return <div style={{fontSize:13,fontWeight:"bold",letterSpacing:"0.2em",color,
+        borderBottom:`1px solid ${border}`,paddingBottom:8,
+        textShadow:`0 0 10px ${color}66, 0 1px 3px rgba(0,0,0,0.9)`}}>{text}</div>;
+    }
+
+    // ─── SpecTile ─────────────────────────────────────────────────────────────
+    // value can be a number or null (cleared state)
+    function SpecTile({ label, value, onChange, min, max, unit: tileUnit, readOnly=false, cleared=false }) {
+      const dispStr = cleared
+        ? "—"
+        : readOnly ? `${value}°` : `${value}${tileUnit}`;
+      const tileColor = cleared ? "#2a4a6f" : "#1e3a5f";
+      const valColor  = cleared ? "#2a5a8a" : "#00d4ff";
+      return (
+        <div style={{background:"#0d1b2e",border:`1px solid ${tileColor}`,borderRadius:4,padding:"8px 10px",textAlign:"center",
+          transition:"border-color 0.2s"}}>
+          <div style={{...labelStyle("#7ab8e8"),fontSize:11,marginBottom:5,display:"block"}}>{label}</div>
+          {(readOnly || cleared) ? (
+            <div style={{fontSize:15,color:valColor,fontWeight:"bold",
+              textShadow:cleared?"none":`0 0 8px #00d4ff88`,opacity:cleared?0.4:1}}>{dispStr}</div>
+          ) : (
+            <div style={{display:"flex",justifyContent:"center"}}>
+              <EditableValue rawValue={value} display={dispStr} onChange={onChange}
+                min={min} max={max} color={valColor} fontSize={15} suffix={tileUnit}/>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── GhostButton ─────────────────────────────────────────────────────────
+    function GhostBtn({ onClick, children, color="#4a7aaa", hoverColor="#00d4ff", danger=false }) {
+      const dc = danger?"#ff4444":color;
+      const hc = danger?"#ff6666":hoverColor;
+      const [hov, setHov] = useState(false);
+      return (
+        <button onClick={onClick}
+          onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{background:"transparent",border:`1px solid ${hov?hc:dc+"55"}`,borderRadius:3,
+            color:hov?hc:dc,fontSize:10,fontWeight:"bold",fontFamily:"inherit",
+            padding:"3px 9px",cursor:"pointer",letterSpacing:"0.1em",whiteSpace:"nowrap",
+            transition:"all 0.15s"}}>
+          {children}
+        </button>
+      );
+    }
+
+    // ─── SavePresetForm ───────────────────────────────────────────────────────
+    function SavePresetForm({ sensorW, sensorH, focalLen, imagePx, customPresets, onSave, onCancel, existingGroups }) {
+      const [name,       setName]       = useState("");
+      const [groupMode,  setGroupMode]  = useState("existing"); // "existing" | "new"
+      const [selGroup,   setSelGroup]   = useState("Custom");
+      const [newGroup,   setNewGroup]   = useState("");
+      const [err,        setErr]        = useState("");
+
+      const canSave = sensorW!=null && sensorH!=null && focalLen!=null && imagePx!=null;
+      const allGroups = ["Custom", ...existingGroups.filter(g=>g!=="Custom")];
+
+      const handleSave = () => {
+        const trimName = name.trim();
+        if (!trimName) { setErr("Please enter a preset name."); return; }
+        if (!canSave)  { setErr("Sensor parameters must be filled before saving."); return; }
+        const finalGroup = groupMode==="new" ? (newGroup.trim()||"Custom") : selGroup;
+        const id = "custom_" + Date.now();
+        onSave({ id, label: trimName, group: finalGroup, sensorW, sensorH, focalLen, imgW: imagePx,
+          note: "Custom preset", isCustom: true });
+      };
+
+      const inputStyle = {
+        background:"#0a1520", border:"1px solid #1e4a6f", borderRadius:4,
+        color:"#e8f4ff", fontSize:12, fontWeight:"bold", fontFamily:"'Courier New', monospace",
+        padding:"6px 10px", outline:"none", width:"100%",
+      };
+
+      return (
+        <div style={{background:"#060d18",border:"1px solid #1e4a6f",borderRadius:6,
+          padding:"16px 18px",display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{...labelStyle("#00d4ff"),fontSize:11}}>SAVE AS CUSTOM PRESET</div>
+
+          {!canSave && (
+            <div style={{fontSize:11,fontWeight:"bold",color:"#ff9966",
+              textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+              ⚠ Sensor parameters are cleared — fill them in before saving.
+            </div>
+          )}
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            {/* Name */}
+            <div>
+              <div style={{...labelStyle("#7ab8e8"),fontSize:10,marginBottom:5}}>PRESET NAME</div>
+              <input type="text" value={name} onChange={e=>{setName(e.target.value);setErr("");}}
+                placeholder="e.g. My Inspire 3 Wide" style={inputStyle}
+                onKeyDown={e=>{if(e.key==="Enter")handleSave();if(e.key==="Escape")onCancel();}}/>
+            </div>
+            {/* Group */}
+            <div>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:5}}>
+                <div style={{...labelStyle("#7ab8e8"),fontSize:10}}>GROUP</div>
+                <div style={{display:"flex",gap:4}}>
+                  {["existing","new"].map(m=>(
+                    <button key={m} onClick={()=>setGroupMode(m)}
+                      style={{background:groupMode===m?"#1e4a6f":"transparent",
+                        border:`1px solid ${groupMode===m?"#2a6a9f":"#1e3a5f"}`,
+                        borderRadius:3,color:groupMode===m?"#7ab8e8":"#3a6a8a",
+                        fontSize:9,fontWeight:"bold",fontFamily:"inherit",
+                        padding:"1px 6px",cursor:"pointer",letterSpacing:"0.08em"}}>
+                      {m==="existing"?"EXISTING":"NEW"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {groupMode==="existing" ? (
+                <div style={{position:"relative"}}>
+                  <select value={selGroup} onChange={e=>setSelGroup(e.target.value)}
+                    style={{...inputStyle,paddingRight:28,cursor:"pointer"}}>
+                    {allGroups.map(g=><option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <div style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
+                    color:"#00d4ff",fontSize:9,pointerEvents:"none"}}>▼</div>
+                </div>
+              ) : (
+                <input type="text" value={newGroup} onChange={e=>setNewGroup(e.target.value)}
+                  placeholder="New group name…" style={inputStyle}
+                  onKeyDown={e=>{if(e.key==="Enter")handleSave();if(e.key==="Escape")onCancel();}}/>
+              )}
+            </div>
+          </div>
+
+          {/* Preview of values being saved */}
+          {canSave && (
+            <div style={{fontSize:10,fontWeight:"bold",color:"#2a6a8a",letterSpacing:"0.05em"}}>
+              Will save → {sensorW}×{sensorH}mm · f={focalLen}mm · {imagePx}px wide
+            </div>
+          )}
+
+          {err && <div style={{fontSize:11,color:"#ff6666",fontWeight:"bold"}}>{err}</div>}
+
+          <div style={{display:"flex",gap:8}}>
+            <GhostBtn onClick={handleSave} color="#6ad86a" hoverColor="#8fdd5a">✓ SAVE PRESET</GhostBtn>
+            <GhostBtn onClick={onCancel}>CANCEL</GhostBtn>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── ManageCustomPresets (list with delete) ───────────────────────────────
+    function ManageCustomPresets({ presets, onDelete, onClose }) {
+      if (presets.length === 0) return (
+        <div style={{background:"#060d18",border:"1px solid #1e3a5f",borderRadius:6,padding:"14px 18px"}}>
+          <div style={{fontSize:11,fontWeight:"bold",color:"#3a6a8a",textAlign:"center"}}>
+            No custom presets saved yet.
+          </div>
+          <div style={{display:"flex",justifyContent:"center",marginTop:10}}>
+            <GhostBtn onClick={onClose}>CLOSE</GhostBtn>
+          </div>
+        </div>
+      );
+      return (
+        <div style={{background:"#060d18",border:"1px solid #1e4a6f",borderRadius:6,padding:"16px 18px"}}>
+          <div style={{...labelStyle("#00d4ff"),fontSize:11,marginBottom:12}}>MANAGE CUSTOM PRESETS</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
+            {presets.map(p => (
+              <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                background:"#0a1520",border:"1px solid #1e3a5f",borderRadius:4,padding:"7px 12px"}}>
+                <div>
+                  <span style={{fontSize:12,fontWeight:"bold",color:"#c8d8f0"}}>{p.label}</span>
+                  <span style={{fontSize:10,color:"#3a6a8a",marginLeft:8}}>[{p.group}]</span>
+                  <span style={{fontSize:10,color:"#2a5a7a",marginLeft:8}}>
+                    {p.sensorW}×{p.sensorH}mm f={p.focalLen}mm {p.imgW}px
+                  </span>
+                </div>
+                <GhostBtn onClick={()=>onDelete(p.id)} danger>✕ DELETE</GhostBtn>
+              </div>
+            ))}
+          </div>
+          <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+            <GhostBtn onClick={onClose}>CLOSE</GhostBtn>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── PresetSelector ───────────────────────────────────────────────────────
+    function PresetSelector({ selectedId, allGroups, onSelect }) {
+      const preset = selectedId ? allGroups.flatMap(g=>g.presets).find(p=>p.id===selectedId) : null;
+      return (
+        <div style={{background:"#080f1c",border:"1px solid #1e4a6f",borderRadius:6,padding:"16px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{...labelStyle("#00d4ff"),fontSize:12}}>CAMERA PRESET</span>
+            <span style={{fontSize:10,fontWeight:"bold",color:"#2a5a7a",letterSpacing:"0.1em"}}>
+              OR EDIT SENSOR PARAMS MANUALLY BELOW
+            </span>
+          </div>
+          <div style={{position:"relative"}}>
+            <select value={selectedId||""} onChange={e=>onSelect(e.target.value||null)}
+              style={{width:"100%",background:"#0d1b2e",
+                border:`1px solid ${selectedId?"#2a6a9f":"#1e4a6f"}`,borderRadius:4,
+                color:selectedId?"#e8f4ff":"#4a7aaa",fontSize:13,fontWeight:"bold",
+                fontFamily:"'Courier New', monospace",padding:"9px 36px 9px 12px",
+                cursor:"pointer",outline:"none",
+                boxShadow:selectedId?"0 0 14px rgba(0,212,255,0.12)":"none"}}>
+              <option value="">— Select a drone / camera —</option>
+              {allGroups.map(g=>(
+                <optgroup key={g.group} label={`── ${g.group} ──`}>
+                  {g.presets.map(p=>(
+                    <option key={p.id} value={p.id}>{p.isCustom?"★ ":""}{p.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
+              color:"#00d4ff",fontSize:10,pointerEvents:"none"}}>▼</div>
+          </div>
+          {preset && (
+            <div style={{marginTop:10,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:"#3a7a9a",flex:1,lineHeight:1.6}}>
+                ⓘ {preset.note}
+                <span style={{color:"#2a5a7a",marginLeft:8}}>
+                  · {preset.sensorW}×{preset.sensorH}mm · f={preset.focalLen}mm · {preset.imgW}px
+                </span>
+              </div>
+              <GhostBtn onClick={()=>onSelect(null)}>✕ CLEAR</GhostBtn>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── App ──────────────────────────────────────────────────────────────────
+    function App() {
+      // Custom presets from localStorage
+      const [customPresets, setCustomPresets] = useState(() => loadCustomPresets());
+
+      // Merge built-in + custom into allGroups
+      const allGroups = React.useMemo(() => {
+        const custom = customPresets;
+        if (custom.length === 0) return BUILTIN_GROUPS;
+        // Group custom presets by their .group field
+        const customByGroup = {};
+        custom.forEach(p => {
+          const g = p.group || "Custom";
+          if (!customByGroup[g]) customByGroup[g] = [];
+          customByGroup[g].push(p);
+        });
+        const result = [...BUILTIN_GROUPS];
+        Object.entries(customByGroup).forEach(([grp, presets]) => {
+          const existing = result.find(g => g.group === grp);
+          if (existing) {
+            // Prepend custom presets to the existing group
+            existing.presets = [...presets, ...existing.presets.filter(p=>!p.isCustom)];
+          } else {
+            result.push({ group: grp, presets });
+          }
+        });
+        return result;
+      }, [customPresets]);
+
+      const flatPresets = allGroups.flatMap(g => g.presets);
+      const presetMap   = Object.fromEntries(flatPresets.map(p => [p.id, p]));
+      const existingCustomGroupNames = [...new Set(customPresets.map(p=>p.group||"Custom"))];
+
+      // Selected preset id
+      const [selectedPresetId, setSelectedPresetId] = useState("m4ewide");
+
+      // Sensor params — null means cleared
+      const [sensorW,  setSensorW]  = useState(17.3);
+      const [sensorH,  setSensorH]  = useState(13.0);
+      const [focalLen, setFocalLen] = useState(12.29);
+      const [imagePx,  setImagePx]  = useState(5280);
+      const [cleared,  setCleared]  = useState(false);
+
+      // UI panels
+      const [showSaveForm, setShowSaveForm]   = useState(false);
+      const [showManage,   setShowManage]     = useState(false);
+
+      // Framing
+      const [buildingHeight, setBuildingHeight] = useState(10);
+      const [unit,           setUnit]           = useState("m");
+      const [buildingType,   setBuildingType]   = useState(BUILDING_TYPES[0]);
+      const [skyPct,         setSkyPct]         = useState(15);
+      const [buildingPct,    setBuildingPct]    = useState(80);
+
+      // Photogrammetry
+      const [overlapPct,      setOverlapPct]      = useState(80);
+      const [droneSpeedMs,    setDroneSpeedMs]    = useState(3);
+      const [shutterDenom,    setShutterDenom]    = useState(500);
+      const [buildingLengthM, setBuildingLengthM] = useState(50);
+
+      // Load preset
+      const applyPreset = (id) => {
+        setSelectedPresetId(id);
+        setShowSaveForm(false);
+        setShowManage(false);
+        if (!id) return;
+        const p = presetMap[id];
+        if (!p) return;
+        setSensorW(p.sensorW);
+        setSensorH(p.sensorH);
+        setFocalLen(p.focalLen);
+        setImagePx(p.imgW);
+        setCleared(false);
+      };
+
+      // Select from dropdown
+      const handlePresetSelect = (id) => {
+        if (id) applyPreset(id);
+        else { setSelectedPresetId(null); }
+      };
+
+      // Manual edits clear the preset indicator
+      const handleSensorW  = v => { setSensorW(Math.max(0.01,v));       setSelectedPresetId(null); setCleared(false); };
+      const handleSensorH  = v => { setSensorH(Math.max(0.01,v));       setSelectedPresetId(null); setCleared(false); };
+      const handleFocalLen = v => { setFocalLen(Math.max(0.01,v));      setSelectedPresetId(null); setCleared(false); };
+      const handleImagePx  = v => { setImagePx(Math.round(Math.max(1,v))); setSelectedPresetId(null); setCleared(false); };
+
+      // Clear params
+      const handleClear = () => {
+        setCleared(true);
+        setSelectedPresetId(null);
+        setShowSaveForm(false);
+      };
+
+      // Drone drag: back-calculate skyPct/buildingPct from dragged D_m/alt_m
+      const handleDroneMove = valid ? (D_m, alt_m) => {
+        const H_m = unit === "ft" ? buildingHeight / 3.28084 : buildingHeight;
+        const { skyPct: s, buildingPct: b } = inverseCalc({
+          D_m, alt_m, bh_m: H_m, sensorH: sh, focalLen: fl,
+        });
+        setSkyPct(s);
+        setBuildingPct(b);
+      } : null;
+
+      // Save custom preset
+      const handleSavePreset = (preset) => {
+        const next = [...customPresets, preset];
+        setCustomPresets(next);
+        saveCustomPresets(next);
+        setShowSaveForm(false);
+        // Auto-select the newly saved preset
+        applyPreset(preset.id);
+      };
+
+      // Delete custom preset
+      const handleDeletePreset = (id) => {
+        const next = customPresets.filter(p => p.id !== id);
+        setCustomPresets(next);
+        saveCustomPresets(next);
+        if (selectedPresetId === id) { setSelectedPresetId(null); }
+      };
+
+      // Effective sensor values (null when cleared)
+      const sw = cleared ? null : sensorW;
+      const sh = cleared ? null : sensorH;
+      const fl = cleared ? null : focalLen;
+      const ip = cleared ? null : imagePx;
+
+      const groundPct = 100 - skyPct - buildingPct;
+      const valid = !cleared && groundPct >= 0 && skyPct >= 0 && buildingPct > 0
+                    && buildingHeight > 0 && sw > 0 && sh > 0 && fl > 0 && ip > 0;
+      const result  = valid ? calculate({ buildingHeight, skyPct, buildingPct, unit, sensorW:sw, sensorH:sh, focalLen:fl }) : null;
+
+      const unitLabel  = unit==="ft" ? "ft" : "m";
+      const speedLabel = unit==="ft" ? "ft/s" : "m/s";
+      const droneSpeedDisp     = unit==="ft" ? (droneSpeedMs*3.28084).toFixed(1) : droneSpeedMs.toFixed(1);
+      const buildingLengthDisp = unit==="ft" ? (buildingLengthM*3.28084).toFixed(0) : buildingLengthM.toFixed(0);
+
+      const overlap = result ? calculateOverlap({
+        D_m:result.D_m, overlapPct, droneSpeed_ms:droneSpeedMs, shutterDenom,
+        buildingLength_m:buildingLengthM, unit, sensorW:sw, sensorH:sh, focalLen:fl, imagePx:ip,
+      }) : null;
+
+      const fovDisplay = (!cleared && sw && sh && fl)
+        ? toDeg(2*Math.atan(sh/(2*fl))).toFixed(2)
+        : "—";
+
+      const panel = {background:"#0d1b2e",border:"1px solid #1e3a5f",borderRadius:6,padding:20,
+        display:"flex",flexDirection:"column",gap:16};
+
+      return (
+        <div style={{minHeight:"100vh",background:"#0a0e1a",
+          fontFamily:"'Courier New','Lucida Console',monospace",
+          color:"#c8d8f0",display:"flex",flexDirection:"column",alignItems:"center"}}>
+
+          {/* ── Header ── */}
+          <div style={{width:"100%",background:"linear-gradient(90deg,#0d1b2e 0%,#132040 50%,#0d1b2e 100%)",
+            borderBottom:"1px solid #1e3a5f",padding:"18px 0 14px",textAlign:"center",
+            position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",inset:0,
+              background:"repeating-linear-gradient(0deg,transparent,transparent 19px,rgba(0,212,255,0.03) 19px,rgba(0,212,255,0.03) 20px)",
+              pointerEvents:"none"}}/>
+            <div style={{fontSize:12,fontWeight:"bold",letterSpacing:"0.35em",color:"#00d4ff",marginBottom:4,textShadow:"0 0 12px #00d4ff88"}}>
+              MULTI-PLATFORM DRONE
+            </div>
+            <div style={{fontSize:22,fontWeight:"bold",letterSpacing:"0.1em",color:"#e8f4ff",textShadow:"0 2px 8px rgba(0,0,0,0.8)"}}>
+              BUILDING DISTANCE CALCULATOR
+            </div>
+            <div style={{fontSize:12,fontWeight:"bold",letterSpacing:"0.2em",color:"#7ab8e8",marginTop:4,textShadow:"0 1px 4px rgba(0,0,0,0.8)"}}>
+              FRAME COMPOSITION + PHOTOGRAMMETRY OVERLAP
+            </div>
+          </div>
+
+          <div style={{width:"100%",maxWidth:880,padding:"24px 20px",display:"flex",flexDirection:"column",gap:20}}>
+
+            {/* ── Preset selector ── */}
+            <PresetSelector selectedId={selectedPresetId} allGroups={allGroups} onSelect={handlePresetSelect}/>
+
+            {/* ── Sensor params header + action buttons ── */}
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{...labelStyle("#7ab8e8"),fontSize:11}}>
+                  SENSOR PARAMETERS
+                  <span style={{color:"#2a5a7a",fontWeight:"normal",letterSpacing:0}}>
+                    {cleared
+                      ? " — cleared · select a preset or enter values manually"
+                      : selectedPresetId
+                        ? " — loaded from preset · click any value to override"
+                        : " — custom · click any value to edit"}
+                  </span>
+                </div>
+                {/* Action buttons */}
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  {!cleared && (
+                    <GhostBtn onClick={()=>{setShowSaveForm(s=>!s);setShowManage(false);}}
+                      color="#6ad86a" hoverColor="#8fdd5a">
+                      {showSaveForm?"▲ CANCEL SAVE":"＋ SAVE AS PRESET"}
+                    </GhostBtn>
+                  )}
+                  {customPresets.length > 0 && (
+                    <GhostBtn onClick={()=>{setShowManage(s=>!s);setShowSaveForm(false);}}>
+                      {showManage?"▲ CLOSE":"⚙ MANAGE"}
+                    </GhostBtn>
+                  )}
+                  <GhostBtn onClick={handleClear} color={cleared?"#2a5a7a":"#ff8c55"} hoverColor={cleared?"#4a8aaa":"#ff6b35"}>
+                    {cleared ? "CLEARED" : "✕ CLEAR PARAMS"}
+                  </GhostBtn>
+                </div>
+              </div>
+
+              {/* Sensor tiles */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
+                <SpecTile label="SENSOR W"  value={cleared?null:sensorW}  onChange={handleSensorW}  min={0.01} max={100}   unit="mm" cleared={cleared}/>
+                <SpecTile label="SENSOR H"  value={cleared?null:sensorH}  onChange={handleSensorH}  min={0.01} max={100}   unit="mm" cleared={cleared}/>
+                <SpecTile label="FOCAL LEN" value={cleared?null:focalLen} onChange={handleFocalLen} min={0.01} max={500}   unit="mm" cleared={cleared}/>
+                <SpecTile label="VERT FOV"  value={fovDisplay} readOnly   unit="°"  cleared={cleared}/>
+                <SpecTile label="IMG WIDTH" value={cleared?null:imagePx}  onChange={handleImagePx}  min={1}    max={20000} unit="px" cleared={cleared}/>
+              </div>
+
+              {/* Save form */}
+              {showSaveForm && (
+                <div style={{marginTop:12}}>
+                  <SavePresetForm
+                    sensorW={cleared?null:sensorW} sensorH={cleared?null:sensorH}
+                    focalLen={cleared?null:focalLen} imagePx={cleared?null:imagePx}
+                    customPresets={customPresets}
+                    existingGroups={existingCustomGroupNames}
+                    onSave={handleSavePreset}
+                    onCancel={()=>setShowSaveForm(false)}/>
+                </div>
+              )}
+
+              {/* Manage panel */}
+              {showManage && (
+                <div style={{marginTop:12}}>
+                  <ManageCustomPresets
+                    presets={customPresets}
+                    onDelete={handleDeletePreset}
+                    onClose={()=>setShowManage(false)}/>
+                </div>
+              )}
+            </div>
+
+            {/* ── Framing + Flight Params (side by side) ── */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+
+              {/* LEFT: Frame Composition sliders */}
+              <div style={panel}>
+                <SectionHeader text="FRAME COMPOSITION"/>
+                <div>
+                  <div style={{...labelStyle("#7ab8e8"),fontSize:11,marginBottom:6}}>UNITS</div>
+                  <div style={{display:"flex",borderRadius:4,overflow:"hidden",border:"1px solid #1e3a5f"}}>
+                    {["m","ft"].map(u=>(
+                      <button key={u} onClick={()=>setUnit(u)} style={{flex:1,padding:"7px 0",
+                        background:unit===u?"#00d4ff":"transparent",
+                        color:unit===u?"#0a0e1a":"#7ab8e8",
+                        border:"none",cursor:"pointer",fontSize:13,fontFamily:"inherit",
+                        fontWeight:"bold",letterSpacing:"0.1em"}}>{u.toUpperCase()}</button>
+                    ))}
+                  </div>
+                </div>
+                <SliderRow label="BUILDING HEIGHT" color="#e8f4ff" value={buildingHeight}
+                  min={1}
+                  max={unit==="m" ? buildingType.maxH_m : buildingType.maxH_ft}
+                  step={1}
+                  displayFn={v=>`${v} ${unitLabel}`}
+                  onChange={v => {
+                    const cap = unit==="m" ? buildingType.maxH_m : buildingType.maxH_ft;
+                    setBuildingHeight(Math.min(v, cap));
+                  }}
+                  suffix={unitLabel}/>
+                <SliderRow label="SKY (TOP %)" color="#7ecfee" value={skyPct} min={0} max={49} step={1}
+                  displayFn={v=>`${v}%`} onChange={v=>{if(v+buildingPct<=100)setSkyPct(v);}} suffix="%"/>
+                <SliderRow label="BUILDING (%)" color="#ffffff" value={buildingPct} min={1} max={99} step={1}
+                  displayFn={v=>`${v}%`} onChange={v=>{if(skyPct+v<=100)setBuildingPct(v);}} suffix="%"/>
+                <div style={{background:groundPct<0?"#2a1010":"#0a1520",
+                  border:`1px solid ${groundPct<0?"#ff4444":"#1e3a5f"}`,
+                  borderRadius:4,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={labelStyle("#7ab8e8")}>GROUND (BOTTOM %)</span>
+                  <span style={{fontSize:15,color:groundPct<0?"#ff4444":"#9edd6a",fontWeight:"bold",
+                    textShadow:`0 0 8px ${groundPct<0?"#ff444488":"#9edd6a88"}`}}>
+                    {groundPct<0?"INVALID":`${groundPct}%`}
+                  </span>
+                </div>
+              </div>
+
+              {/* RIGHT: Calculated Flight Parameters */}
+              <div style={{display:"flex",flexDirection:"column",gap:0}}>
+                {cleared ? (
+                  <div style={{...panel,justifyContent:"center",alignItems:"center",height:"100%",
+                    color:"#2a6a8a",fontSize:13,fontWeight:"bold",letterSpacing:"0.1em",textAlign:"center"}}>
+                    SELECT A PRESET OR ENTER SENSOR PARAMETERS TO CALCULATE
+                  </div>
+                ) : result && valid ? (
+                  <div style={{background:"linear-gradient(135deg,#0d1b2e,#0a1520)",border:"1px solid #00d4ff",
+                    borderRadius:6,padding:"20px 24px",boxShadow:"0 0 30px rgba(0,212,255,0.08)",height:"100%",
+                    display:"flex",flexDirection:"column",gap:14}}>
+                    <SectionHeader text="CALCULATED FLIGHT PARAMETERS" color="#00d4ff" border="#1e4a6f"/>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+                      {[
+                        { label:"DISTANCE TO BUILDING", value:result.distance.toFixed(1), sub:unitLabel, color:"#00d4ff", note:`≈ ${(result.distance/buildingHeight).toFixed(2)}× H` },
+                        { label:"DRONE ALTITUDE (AGL)",  value:result.altitude.toFixed(1),  sub:unitLabel, color:"#ff6b35", note:`≈ ${(result.altitude/buildingHeight).toFixed(2)}× H` },
+                        { label:"GROUND COVERAGE",       value:result.groundCoverage.toFixed(1), sub:unitLabel, color:"#8fdd5a", note:"horizontal span" },
+                      ].map(({label,value,sub,color,note})=>(
+                        <div key={label} style={{background:"#080d18",border:`1px solid ${color}33`,borderRadius:4,padding:"12px 14px",borderLeft:`3px solid ${color}`}}>
+                          <div style={{...labelStyle("#7ab8e8"),fontSize:10,marginBottom:6}}>{label}</div>
+                          <div style={{fontSize:24,fontWeight:"bold",color,lineHeight:1,textShadow:`0 0 12px ${color}66`}}>
+                            {value}<span style={{fontSize:12,marginLeft:4,opacity:0.8}}>{sub}</span>
+                          </div>
+                          <div style={noteStyle("#6a9abf")}>{note}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                      {[
+                        { label:"ANGLE TO BLDG TOP",  value:`${result.alphaTopDeg.toFixed(2)}° above level` },
+                        { label:"ANGLE TO BLDG BASE", value:`${result.alphaBottomDeg.toFixed(2)}° below level` },
+                      ].map(({label,value})=>(
+                        <div key={label} style={{background:"#080d18",border:"1px solid #1e3a5f",borderRadius:4,padding:"9px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={labelStyle("#7ab8e8")}>{label}</span>
+                          <span style={{fontSize:13,color:"#ff8c55",fontWeight:"bold",textShadow:"0 0 8px #ff6b3566"}}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{padding:"10px 14px",background:"#060a14",border:"1px solid #1e3a5f",borderRadius:4,
+                      fontSize:11,fontWeight:"bold",color:"#6a9abf",lineHeight:1.8,textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+                      ⚠ Gimbal at 0° (perfectly level) · Altitude is AGL from building base
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{...panel,justifyContent:"center",alignItems:"center",height:"100%",
+                    border:"1px solid #2a1010",color:"#ff4444",fontSize:13,fontWeight:"bold",
+                    letterSpacing:"0.1em",textAlign:"center"}}>
+                    INVALID — Sky% + Building% must not exceed 100%
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── FOV Diagram — full width ── */}
+            <div style={{...panel, gap:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <SectionHeader text="FIELD OF VIEW DIAGRAM"/>
+                {/* Building type selector inline */}
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={{...labelStyle("#7ab8e8"),fontSize:10}}>BUILDING TYPE</span>
+                  <div style={{display:"flex",borderRadius:4,overflow:"hidden",border:"1px solid #1e3a5f"}}>
+                    {BUILDING_TYPES.map((bt,i)=>(
+                      <button key={bt.id} onClick={()=>{
+                        setBuildingType(bt);
+                        const newH = unit==="m" ? bt.defaultH_m : Math.round(bt.defaultH_m * 3.28084);
+                        setBuildingHeight(newH);
+                      }} style={{
+                        padding:"5px 12px",
+                        background: buildingType.id===bt.id ? "#1e4a6f" : "transparent",
+                        color: buildingType.id===bt.id ? "#7ab8e8" : "#3a6a8a",
+                        border:"none",
+                        borderRight: i < BUILDING_TYPES.length-1 ? "1px solid #1e3a5f" : "none",
+                        cursor:"pointer", fontSize:10, fontFamily:"inherit",
+                        fontWeight:"bold", letterSpacing:"0.07em",
+                        transition:"background 0.15s, color 0.15s",
+                      }}>{bt.label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{fontSize:10,color:"#2a6a8a",fontWeight:"bold",letterSpacing:"0.04em",marginTop:-6}}>
+                {buildingType.note} · max {unit==="m" ? buildingType.maxH_m+"m" : buildingType.maxH_ft+"ft"}
+              </div>
+
+              <div style={{background:"#060d18", border:"1px solid #1a3050", borderRadius:4, overflow:"hidden", lineHeight:0}}>
+                <DiagramSVG
+                  skyPct={skyPct} buildingPct={buildingPct} groundPct={groundPct}
+                  result={result} unit={unit}
+                  buildingHeight={buildingHeight}
+                  barWidthFrac={buildingType.barW}
+                  maxH_m={buildingType.maxH_m}
+                  maxH_ft={buildingType.maxH_ft}
+                  onDroneMove={handleDroneMove}
+                />
+              </div>
+
+              <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4,
+                fontSize:10, fontWeight:"bold", color:"#4a7aaa",
+                textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+                <div>― ― <span style={{color:"#ff6b35"}}>orange</span> building bounds</div>
+                <div>··· <span style={{color:"#4ab8d8"}}>cyan</span> frame edges (FOV)</div>
+                <div>━ <span style={{color:"#e0e0e0"}}>white</span> ground line (fixed)</div>
+                <div>✈ <span style={{color:"#4ab8d8"}}>drag drone</span> to reframe · touch supported</div>
+              </div>
+            </div>
+
+            {/* ── Photogrammetry ── */}
+            {!cleared && result && valid && (
+              <div style={{background:"linear-gradient(135deg,#0e1a10,#0a150a)",border:"1px solid #3a8a3a",
+                borderRadius:6,padding:"20px 24px",boxShadow:"0 0 30px rgba(100,220,100,0.06)"}}>
+                <SectionHeader text="PHOTOGRAMMETRY OVERLAP · FACADE SCAN" color="#6ad86a" border="#2a5a2a"/>
+                <div style={{background:"#060d06",border:"1px solid #2a5a2a",borderRadius:4,
+                  padding:"10px 14px",marginTop:14,marginBottom:0,
+                  fontSize:11,fontWeight:"bold",color:"#6acc6a",lineHeight:2.1,
+                  fontFamily:"monospace",textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+                  <span style={{color:"#8ee88e"}}>footprint_W</span> = D × (sensor_W ÷ f)
+                  &emsp;·&emsp;<span style={{color:"#8ee88e"}}>step</span> = footprint_W × (1 − overlap)
+                  &emsp;·&emsp;<span style={{color:"#8ee88e"}}>GSD</span> = (pixel_pitch ÷ f) × D
+                  &emsp;·&emsp;<span style={{color:"#8ee88e"}}>interval</span> = step ÷ speed
+                  &emsp;·&emsp;<span style={{color:"#8ee88e"}}>blur_px</span> = (speed ÷ shutter) ÷ GSD
+                </div>
+
+                {/* ── Overlap visualiser ── */}
+                {overlap && (
+                  <div style={{
+                    background:"#040d06", border:"1px solid #1e4a1e", borderRadius:4,
+                    overflow:"hidden", lineHeight:0, marginTop:14,
+                  }}>
+                    <OverlapViz
+                      overlap={overlap}
+                      overlapPct={overlapPct}
+                      unit={unit}
+                      buildingHeight={buildingHeight}
+                      buildingLengthM={buildingLengthM}
+                      droneSpeedMs={droneSpeedMs}
+                      shutterDenom={shutterDenom}
+                    />
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:16,marginBottom:20}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    <SliderRow label="OVERLAP %" color="#6ad86a" value={overlapPct} min={50} max={95} step={5}
+                      displayFn={v=>`${v}%`} onChange={setOverlapPct} suffix="%"/>
+                    <SliderRow label={`DRONE SPEED (${speedLabel})`} color="#f0d040"
+                      value={droneSpeedMs} min={0.1} max={20} step={0.1}
+                      displayFn={v=>`${unit==="ft"?(v*3.28084).toFixed(1):v.toFixed(1)} ${speedLabel}`}
+                      onChange={setDroneSpeedMs} suffix={speedLabel}/>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    <SliderRow label="SHUTTER SPEED" color="#cc88ff" value={shutterDenom} min={50} max={4000} step={50}
+                      displayFn={v=>`1/${v}s`} onChange={setShutterDenom} suffix="(denominator)"/>
+                    <SliderRow label={`BUILDING LENGTH (${unitLabel})`} color="#ff9966"
+                      value={buildingLengthM} min={1} max={1000} step={1}
+                      displayFn={v=>`${unit==="ft"?(v*3.28084).toFixed(0):v.toFixed(0)} ${unitLabel}`}
+                      onChange={setBuildingLengthM} suffix={unitLabel}/>
+                  </div>
+                </div>
+                {overlap && (
+                  <div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
+                      {[
+                        { label:"IMAGE FOOTPRINT W", value:overlap.footprintW.toFixed(1),    sub:unitLabel, color:"#6ad86a", note:"horizontal coverage per frame" },
+                        { label:"IMAGE FOOTPRINT H", value:overlap.footprintH.toFixed(1),    sub:unitLabel, color:"#6ad86a", note:"vertical coverage per frame" },
+                        { label:"STEP DISTANCE",     value:overlap.stepDist.toFixed(2),       sub:unitLabel, color:"#f0d040", note:`advance per shot · ${overlapPct}% overlap` },
+                        { label:"TRIGGER INTERVAL",  value:overlap.interval_s.toFixed(2),    sub:"s",       color:"#cc88ff", note:`at ${droneSpeedDisp} ${speedLabel}` },
+                        { label:"GSD",               value:overlap.GSD_cm_per_px.toFixed(2), sub:"cm/px",   color:"#00d4ff", note:`${overlap.GSD_mm_per_px.toFixed(2)} mm/px` },
+                        { label:"MAX SAFE SPEED",    value:(unit==="ft"?overlap.maxSpeed:overlap.maxSpeed_ms).toFixed(2), sub:speedLabel, color:"#ff9966", note:`≤1 px blur @ 1/${shutterDenom}s` },
+                      ].map(({label,value,sub,color,note})=>(
+                        <div key={label} style={{background:"#060d06",border:`1px solid ${color}33`,borderRadius:4,padding:"12px 14px",borderLeft:`3px solid ${color}`}}>
+                          <div style={{...labelStyle("#6acc6a"),marginBottom:6}}>{label}</div>
+                          <div style={{fontSize:22,fontWeight:"bold",color,lineHeight:1,textShadow:`0 0 10px ${color}55`}}>
+                            {value}<span style={{fontSize:12,marginLeft:3,opacity:0.85}}>{sub}</span>
+                          </div>
+                          <div style={noteStyle("#5a9a5a")}>{note}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{marginTop:14,background:"#060d06",border:"1px solid #2a5a2a",borderRadius:4,
+                      padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:12,fontWeight:"bold",color:"#6acc6a",letterSpacing:"0.12em",textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+                        MOTION BLUR @ {droneSpeedDisp} {speedLabel} · 1/{shutterDenom}s shutter
+                      </span>
+                      <BlurBadge blurPx={overlap.blurPx}/>
+                    </div>
+                    {overlap.numShots !== null && (
+                      <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                        {[
+                          { label:"PHOTOS FOR FULL LENGTH", value:`${overlap.numShots}`, sub:"shots" },
+                          { label:"TOTAL SCAN TIME",
+                            value:overlap.totalTime_s<60?overlap.totalTime_s.toFixed(0):(overlap.totalTime_s/60).toFixed(1),
+                            sub:overlap.totalTime_s<60?"sec":"min" },
+                          { label:"BUILDING LENGTH", value:buildingLengthDisp, sub:unitLabel },
+                        ].map(({label,value,sub})=>(
+                          <div key={label} style={{background:"#060d06",border:"1px solid #2a5a2a",borderRadius:4,padding:"9px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{...labelStyle("#6acc6a"),fontSize:11}}>{label}</span>
+                            <span style={{fontSize:15,color:"#ff9966",fontWeight:"bold",textShadow:"0 0 8px #ff996655"}}>
+                              {value} <span style={{fontSize:11,opacity:0.85}}>{sub}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{marginTop:12,padding:"10px 14px",background:"#040a04",border:"1px solid #2a5a2a",borderRadius:4,
+                      fontSize:11,fontWeight:"bold",color:"#6acc6a",lineHeight:1.9,textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
+                      ⚠ Overlap is along the building facade (horizontal axis only) · Single-pass scan assumed · GSD computed from horizontal sensor axis · Trigger latency assumed negligible
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
